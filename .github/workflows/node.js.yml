@@ -1,0 +1,31 @@
+name: Deploy Node.js App
+
+on:
+  push:
+    branches: [ "main" ]  # Run on push to main
+
+jobs:
+  deploy:
+    runs-on: self-hosted  # Use your self-hosted runner
+
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+
+    - name: Use Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: 20.x  # Use your preferred version
+        cache: 'npm'
+
+    - name: Install Dependencies
+      run: npm ci
+
+    # - name: Build (SKIPPED)
+    #   run: npm run build --if-present
+
+    - name: Run Tests (Optional)
+      run: npm test
+
+    - name: Restart PM2 App
+      run: pm2 restart 0
