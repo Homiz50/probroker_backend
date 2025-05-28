@@ -33,8 +33,18 @@ const propertyDetailsSchema = new mongoose.Schema({
     default: Date.now
   }
 });
+const filters = {
+  areas: [],
+  bhk: [],
+  furnitureTypes: [],
+  subType:[],
+  minRent:[],
+  maxRent:[],
+  minsqFt:[],
+  maxsqFt:[]
+};
 
 propertyDetailsSchema.plugin(mongoosePaginate);
 
 // ✅ Explicitly connect to 'Proeprty-Details' collection
-module.exports = mongoose.model('PropertyDetails', propertyDetailsSchema, 'Proeprty-Details');
+module.exports = mongoose.model('PropertyDetails', propertyDetailsSchema, 'Proeprty-Details' ,filters);

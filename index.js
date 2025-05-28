@@ -33,6 +33,11 @@ app.use((err, req, res, next) => {
   });
 });
 // const mongoURI = `mongodb+srv://${process.env.MONGO_USER}:${process.env.MONGO_PASSWORD}@${process.env.MONGO_CLUSTER}`;
+//for testing Localhost
+app.get('/hello', (req, res) => {
+  res.send('hello world');
+});
+
 
 // Connect to MongoDB - Replace with your connection string
 mongoose.connect("mongodb+srv://bhakodiyaprince05:prince.pb00@procluster.7asw1tr.mongodb.net/citynect", {

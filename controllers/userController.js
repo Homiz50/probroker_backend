@@ -221,7 +221,7 @@ filterPropertiesv2: async (req, res) => {
 
     // Fetch paginated properties manually
     const result = await propertyService.filterPropertiesSharingFlatV2(filterRequest, page, size);
-
+    // console.log(`this is Fillter ${result} + ${filterRequest} + ${page} + ${size}`)
     return res.status(200).json({
       success: true,
       error: "",
@@ -233,6 +233,7 @@ filterPropertiesv2: async (req, res) => {
       }
     });
   } catch (error) {
+    console.log("Catch")
     console.error(error);
     return res.status(500).json({
       success: false,
@@ -256,11 +257,13 @@ filterPropertiesv2: async (req, res) => {
   saveProperty: async (req, res) => {
     try {
       const { userId, propId } = req.body;
-      
+      console.log("Save and Un SAve Properties")
+      console.log(`suerid ${userId},Property id ${ propId}`)
       const responseMessage = await savePropertyToUser(userId, propId);
       return res.status(200).json(createResponse(true, "", responseMessage));
     } catch (error) {
       if (error instanceof TypeError || error instanceof RangeError) {
+        console.log("error for testing localhost", error)
         return res.status(400).json(createResponse(false, error.message, {}));
       }
       return res.status(500).json(createResponse(false, error.message, {}));
@@ -271,9 +274,10 @@ filterPropertiesv2: async (req, res) => {
   contactPropertyV2: async (req, res) => {
     try {
       const { userId, propId } = req.body;
-      
+      console.log("this is Conatenct")
+     console.log(`User id ${userId} and Property id ${propId}`)
       const property = await propertyService.contactPropertyToUserV2(userId, propId);
-      
+    console.log(`Prop is ${property}`)
       const response = {
         name: property.name,
         number: userId === "67128ea2d6da233a1af20f30" 
@@ -281,9 +285,11 @@ filterPropertiesv2: async (req, res) => {
           : property.number
       };
       
+      console.log(`Response ${response}`)
       return res.status(200).json(createResponse(true, "", response));
     } catch (error) {
       if (error instanceof TypeError || error instanceof RangeError) {
+        console.log("this is Catch")
         return res.status(400).json(createResponse(false, error.message, {}));
       }
       return res.status(500).json(createResponse(false, error.message, {}));
@@ -295,7 +301,8 @@ filterPropertiesv2: async (req, res) => {
     try {
       const { id } = req.params;
       const { newStatus, userId } = req.body;
-      
+      console.log(id + " User Id this is Status id " )
+      console.log(newStatus +" New " , userId + "UserId")
       const updatedProperty = await propertyService.updatePropertyStatus(id, newStatus, userId);
       
       const response = {
@@ -312,13 +319,13 @@ getSavedProperties: async (req, res) => {
   try {
     const { userId } = req.params;
     let { page = 0, size = 10 } = req.query;
-    
+    console.log("this is Save property")
+    console.log(`user id is = ${userId}`)
     // Convert to integers
     page = parseInt(page);
     size = parseInt(size);
     
     const paginatedProperties = await propertyService.getSavedPropertiesV2(userId, page, size);
-    
     // The service now returns { properties, currentPage, totalItems, totalPages }
     // So we can use it directly without transformation
     const response = {
@@ -327,7 +334,7 @@ getSavedProperties: async (req, res) => {
       totalItems: paginatedProperties.totalItems,
       totalPages: paginatedProperties.totalPages
     };
-    
+    // console.log(`Response Of Save Property  = ${response}`)
     return res.status(200).json(createResponse(true, "", response));
   } catch (error) {
     return res.status(500).json(createResponse(false, `An error occurred while fetching properties: ${error.message}`, null));
