@@ -256,14 +256,22 @@ filterPropertiesv2: async (req, res) => {
   // Save property to user
   saveProperty: async (req, res) => {
     try {
+      console.log('Received save property request:', req.body);
       const { userId, propId } = req.body;
-      console.log("Save and Un SAve Properties")
-      console.log(`suerid ${userId},Property id ${ propId}`)
+      
+      if (!userId || !propId) {
+        console.log('Missing userId or propId:', { userId, propId });
+        return res.status(400).json(createResponse(false, "Missing userId or propId", {}));
+      }
+
+      console.log('Calling savePropertyToUser with:', { userId, propId });
       const responseMessage = await savePropertyToUser(userId, propId);
+      console.log('Save property response:', responseMessage);
+      
       return res.status(200).json(createResponse(true, "", responseMessage));
     } catch (error) {
+      console.error('Error in saveProperty:', error);
       if (error instanceof TypeError || error instanceof RangeError) {
-        console.log("error for testing localhost", error)
         return res.status(400).json(createResponse(false, error.message, {}));
       }
       return res.status(500).json(createResponse(false, error.message, {}));
@@ -273,11 +281,18 @@ filterPropertiesv2: async (req, res) => {
   // Contact property v2
   contactPropertyV2: async (req, res) => {
     try {
+      console.log('Received contact request:', req.body);
       const { userId, propId } = req.body;
-      console.log("this is Conatenct")
-     console.log(`User id ${userId} and Property id ${propId}`)
+
+      if (!userId || !propId) {
+        console.log('Missing userId or propId:', { userId, propId });
+        return res.status(400).json(createResponse(false, "Missing userId or propId", {}));
+      }
+
+      console.log('Calling contactPropertyToUserV2 with:', { userId, propId });
       const property = await propertyService.contactPropertyToUserV2(userId, propId);
-    console.log(`Prop is ${property}`)
+      console.log('Property details:', property);
+
       const response = {
         name: property.name,
         number: userId === "67128ea2d6da233a1af20f30" 
@@ -285,11 +300,11 @@ filterPropertiesv2: async (req, res) => {
           : property.number
       };
       
-      console.log(`Response ${response}`)
+      console.log('Sending response:', response);
       return res.status(200).json(createResponse(true, "", response));
     } catch (error) {
+      console.error('Error in contactPropertyV2:', error);
       if (error instanceof TypeError || error instanceof RangeError) {
-        console.log("this is Catch")
         return res.status(400).json(createResponse(false, error.message, {}));
       }
       return res.status(500).json(createResponse(false, error.message, {}));

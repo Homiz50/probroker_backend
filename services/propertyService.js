@@ -83,18 +83,18 @@ class PropertyService {
     let query = { isDeleted: { $ne: 1 } };
     
     // Debug logging for filter request
-    console.log('Filter Request:', {
-      subType,
-      type,
-      status,
-      areas,
-      bhks,
-      furnishedTypes,
-      minRent,
-      maxRent,
-      minsqFt,
-      maxsqFt
-    });
+    // console.log('Filter Request:', {
+    //   subType,
+    //   type,
+    //   status,
+    //   areas,
+    //   bhks,
+    //   furnishedTypes,
+    //   minRent,
+    //   maxRent,
+    //   minsqFt,
+    //   maxsqFt
+    // });
 
     // 1. Premium check
     if (userId) {
@@ -206,21 +206,27 @@ class PropertyService {
       query.listedDate = { $gte: start, $lte: end };
     }
 
-    // 5. Pagination
-    const skip = page * size;
-    let properties = await PropertyDetails.find(query)
-      .sort({ createdOn: -1 })
-      .skip(skip)
-      .limit(size)
-      .lean();
-    const totalItems = await PropertyDetails.countDocuments(query);
+    // 1. Find all matching property IDs (no pagination yet)
+    const allProperties = await PropertyDetails.find(query).sort({ createdOn: -1 }).lean();
+    const allIds = allProperties.map(p => p._id.toString());
 
-    // 6. Add extra metadata
-    if (userId && properties.length) {
+    // 2. Get status for these properties for this user
+    const statuses = await UserPropertyStatus.find({ userId, propId: { $in: allIds } }).lean();
+    const statusMap = Object.fromEntries(statuses.map(s => [s.propId, s.status]));
+
+    // 3. Filter out excluded statuses
+    const excludedStatuses = ["Sell out", "Rent out", "Broker", "Duplicate"];
+    const visibleProperties = allProperties.filter(p => !excludedStatuses.includes(statusMap[p._id.toString()] || "Active"));
+
+    // 4. Paginate the filtered list
+    let paginatedProperties = visibleProperties.slice(page * size, (page + 1) * size);
+
+    // 5. Add extra metadata
+    if (userId && paginatedProperties.length) {
       const user = await User.findById(userId).lean();
       const savedSet = new Set(user.savedPropertyIds || []);
       const contactedSet = new Set(user.contactedPropertyIds || []);
-      const ids = properties.map((p) => p._id.toString());
+      const ids = paginatedProperties.map((p) => p._id.toString());
 
       const [statuses, remarks] = await Promise.all([
         UserPropertyStatus.find({ userId, propId: { $in: ids } }).lean(),
@@ -233,9 +239,8 @@ class PropertyService {
       const remarkMap = Object.fromEntries(
         remarks.map((r) => [r.propId, r.remark])
       );
-      const excludedStatuses = ["Sell out", "Rent out", "Broker", "Duplicate"];
 
-      properties = properties
+      paginatedProperties = paginatedProperties
         .map((p) => {
           const id = p._id.toString();
           const isSpecificUser = userId === "67128ea2d6da233a1af20f30";
@@ -252,15 +257,18 @@ class PropertyService {
               : "0",
             name: contactedSet.has(id) ? p.name : "0",
           };
-        })
-        .filter((p) => !excludedStatuses.includes(p.status));
+        });
     }
 
+    // Corrected totalPages calculation and moved try-catch
+    const totalItems = visibleProperties.length;
+    const totalPages = Math.ceil(totalItems / size); // Correct calculation
+
     return {
-      properties,
+      properties: paginatedProperties,
       currentPage: page,
-      totalItems,
-      totalPages: Math.ceil(totalItems / size),
+      totalItems: totalItems,
+      totalPages: totalPages,
     };
   }
 
@@ -349,21 +357,29 @@ class PropertyService {
    * @returns {Promise<Object>} - Property details
    */
   async contactPropertyToUserV2(userId, propId) {
+    console.log('contactPropertyToUserV2 called with:', { userId, propId });
+
     if (!userId || !propId) {
+      console.log('Invalid input:', { userId, propId });
       throw new TypeError("User ID and Property ID are required");
     }
 
     const user = await User.findById(userId);
+    console.log('Found user:', user ? 'Yes' : 'No');
+    
     if (!user) {
       throw new Error("User not found");
     }
 
     const property = await PropertyDetails.findById(propId);
+    console.log('Found property:', property ? 'Yes' : 'No');
+    
     if (!property) {
       throw new Error("Property not found");
     }
 
     // Check if user has reached contact limit
+    console.log('User contact limit:', user.limit);
     if (user.limit <= 0) {
       throw new Error("Contact limit reached");
     }
@@ -373,11 +389,28 @@ class PropertyService {
       user.contactedPropertyIds = [];
     }
 
+    // user.contactedPropertyIds.push(propId);
+    // user.limit--;
+    // user.totalCount = (user.totalCount || 0) + 1;
+    // await user.save();
+
     if (!user.contactedPropertyIds.includes(propId)) {
-      user.contactedPropertyIds.push(propId);
-      user.limit--;
-      user.totalCount = (user.totalCount || 0) + 1;
-      await user.save();
+      console.log('Adding property to contacted list');
+      // Use findOneAndUpdate instead of save to bypass validation
+      await User.findOneAndUpdate(
+        { _id: userId },
+        {
+          $push: { contactedPropertyIds: propId },
+          $inc: { 
+            limit: -1,
+            totalCount: 1
+          }
+        },
+        { new: true }
+      );
+      console.log('User updated successfully');
+    } else {
+      console.log('Property already in contacted list');
     }
 
     return property;

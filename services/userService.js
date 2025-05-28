@@ -228,36 +228,51 @@ const registerUser = async (userData) => {
  */
 const savePropertyToUser = async (userId, propId) => {
   if (!userId || !userId.trim() || !propId || !propId.trim()) {
+    console.log('Invalid input:', { userId, propId });
     throw new Error("Invalid user ID or property ID!");
   }
   
+  console.log('Attempting to save/unsave property:', { userId, propId });
   try {
+    // First check if user exists
     const user = await User.findById(userId);
-    
     if (!user) {
+      console.log('User not found:', userId);
       throw new Error("User not found!");
     }
-    
+
+    // Initialize savedPropertyIds if it doesn't exist
     if (!user.savedPropertyIds) {
       user.savedPropertyIds = [];
-    }
-    
-    // Check if property is already saved
-    const index = user.savedPropertyIds.indexOf(propId);
-    
-    if (index !== -1) {
-      // Remove property
-      user.savedPropertyIds.splice(index, 1);
       await user.save();
+    }
+
+    // Check if property is already saved
+    const isSaved = user.savedPropertyIds.includes(propId);
+   
+    if (isSaved) {
+      // Unsave property
+      console.log('Removing property from saved list');
+      const result = await User.findByIdAndUpdate(
+        userId,
+        { $pull: { savedPropertyIds: propId } },
+        { new: true }
+      );
+      console.log('Property removed successfully');
       return "Property removed from saved list successfully.";
     } else {
-      // Add property
-      user.savedPropertyIds.push(propId);
-      await user.save();
+      // Save property
+      console.log('Adding property to saved list');
+      const result = await User.findByIdAndUpdate(
+        userId,
+        { $addToSet: { savedPropertyIds: propId } },
+        { new: true }
+      );
+      console.log('Property added successfully');
       return "Property added to saved list successfully.";
     }
-    
   } catch (error) {
+    console.error('Error in savePropertyToUser:', error);
     throw error;
   }
 };
