@@ -253,28 +253,54 @@ filterPropertiesv2: async (req, res) => {
     }
   },
 
-  // Save property to user
+  // Save property
   saveProperty: async (req, res) => {
     try {
-      console.log('Received save property request:', req.body);
       const { userId, propId } = req.body;
       
       if (!userId || !propId) {
-        console.log('Missing userId or propId:', { userId, propId });
-        return res.status(400).json(createResponse(false, "Missing userId or propId", {}));
+        return res.status(400).json(createResponse(false, "User ID and Property ID are required", null));
       }
 
-      console.log('Calling savePropertyToUser with:', { userId, propId });
-      const responseMessage = await savePropertyToUser(userId, propId);
-      console.log('Save property response:', responseMessage);
-      
-      return res.status(200).json(createResponse(true, "", responseMessage));
-    } catch (error) {
-      console.error('Error in saveProperty:', error);
-      if (error instanceof TypeError || error instanceof RangeError) {
-        return res.status(400).json(createResponse(false, error.message, {}));
+      // Check if property exists
+      const property = await PropertyDetails.findById(propId);
+      if (!property) {
+        return res.status(404).json(createResponse(false, "Property not found", null));
       }
-      return res.status(500).json(createResponse(false, error.message, {}));
+
+      // Check if user exists
+      const user = await User.findById(userId);
+      if (!user) {
+        return res.status(404).json(createResponse(false, "User not found", null));
+      }
+
+      // Initialize savedPropertyIds array if it doesn't exist
+      if (!user.savedPropertyIds) {
+        user.savedPropertyIds = [];
+      }
+
+      // Check if property is already saved
+      if (user.savedPropertyIds.includes(propId)) {
+        // If already saved, remove it (unsave)
+        await User.findByIdAndUpdate(
+          userId,
+          { $pull: { savedPropertyIds: propId } },
+          { new: true }
+        );
+        return res.status(200).json(createResponse(true, "Property unsaved successfully", { saved: false }));
+      }
+
+      // Save the property
+      await User.findByIdAndUpdate(
+        userId,
+        { $addToSet: { savedPropertyIds: propId } },
+        { new: true }
+      );
+
+      return res.status(200).json(createResponse(true, "Property saved successfully", { saved: true }));
+    } catch (error) {
+      console.error("Error in saveProperty:", error);
+      return res.status(500).json(createResponse(false, error.message || "Failed to save property", null));
     }
   },
 
@@ -311,6 +337,24 @@ filterPropertiesv2: async (req, res) => {
     }
   },
 
+  
+  searchquery: async (req, res) => {
+    try {
+      console.log(req.query)
+      const { query} = req.query;
+      const property = await propertyService.searchpremiseandaddress(query);
+      console.log('Property details:', property);
+      return res.status(200).send(property);
+    } catch (error) {
+      console.error('Error in contactPropertyV2:', error);
+      if (error instanceof TypeError || error instanceof RangeError) {
+        return res.status(400).json(createResponse(false, error.message, {}));
+      }
+      return res.status(500).json(createResponse(false, error.message, {}));
+    }
+  },
+
+
   // Change property status
   changePropertyStatus: async (req, res) => {
     try {
@@ -321,12 +365,14 @@ filterPropertiesv2: async (req, res) => {
       const updatedProperty = await propertyService.updatePropertyStatus(id, newStatus, userId);
       
       const response = {
-        id: updatedProperty.propId,
-        status: updatedProperty.status
+        id: updatedProperty.propertyId,
+        status: updatedProperty.newStatus,
+        userId: userId
       };
       
       return res.status(200).json(createResponse(true, "", response));
     } catch (error) {
+      console.error("Error in changePropertyStatus:", error);
       return res.status(500).json(createResponse(false, error.message, {}));
     }
   },

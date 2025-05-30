@@ -82,20 +82,6 @@ class PropertyService {
 
     let query = { isDeleted: { $ne: 1 } };
     
-    // Debug logging for filter request
-    // console.log('Filter Request:', {
-    //   subType,
-    //   type,
-    //   status,
-    //   areas,
-    //   bhks,
-    //   furnishedTypes,
-    //   minRent,
-    //   maxRent,
-    //   minsqFt,
-    //   maxsqFt
-    // });
-
     // 1. Premium check
     if (userId) {
       const user = await User.findById(userId).lean();
@@ -109,7 +95,7 @@ class PropertyService {
       }
     }
 
-    // 2. Filters
+    // 2. Build base query with all filters
     if (type) query.type = type;
     if (location) query.address = { $regex: location, $options: "i" };
     if (priceMin || priceMax) {
@@ -119,157 +105,124 @@ class PropertyService {
     }
     if (gender) query.gender = gender;
     if (roomType) query.roomType = roomType;
-
-    // Add area filter
-    if (areas && areas.length > 0) {
-      query.area = { $in: areas };
-    }
-
-    // Square feet range filter
+    if (areas?.length) query.area = { $in: areas };
+    if (subType?.length) query.unitType = { $in: subType };
+    if (bhks?.length) query.bhk = { $in: bhks };
+    if (furnishedTypes?.length) query.furnishedType = { $in: furnishedTypes };
     if (minsqFt || maxsqFt) {
       query.sqFt = {};
       if (minsqFt) query.sqFt.$gte = Number(minsqFt);
       if (maxsqFt) query.sqFt.$lte = Number(maxsqFt);
     }
-
     if (minRent || maxRent) {
       query.rentValue = {};
       if (minRent) query.rentValue.$gte = Number(minRent);
       if (maxRent) query.rentValue.$lte = Number(maxRent);
     }
-
-    // Add subType filter with logging
-    if (subType && subType.length > 0) {
-      query.unitType = { $in: subType };
-    }
-
-    // Add BHK filter
-    if (bhks && bhks.length > 0) {
-      query.bhk = { $in: bhks };
-    }
-
-    // Add furniture type filter
-    if (furnishedTypes && furnishedTypes.length > 0) {
-      query.furnishedType = { $in: furnishedTypes };
-    }
-
-    // Log final query
-    // console.log('Final MongoDB Query:', JSON.stringify(query, null, 2));
-
     if (amenities?.length) {
       query.$and = amenities.map((a) => ({
         amenities: { $regex: new RegExp(`\\b${a}\\b`, "i") },
       }));
     }
-    if (search && search.trim()) {
+    if (search?.trim()) {
       const words = search.trim().split(/\s+/).filter(Boolean);
-      query.$or = [
-        ...words.map((word) => ({
-          title: { $regex: new RegExp(`.*${word}.*`, "i") },
-        })),
+      query.$or = words.map((word) => ({
+        title: { $regex: new RegExp(`.*${word}.*`, "i") },
+      }));
+    }
+
+    try {
+      // 5. Build aggregation pipeline for efficient querying
+      const pipeline = [
+        { $match: query },
+        { $sort: { createdOn: -1 } }
       ];
-    }
 
-    // 3. Status filter
-    const now = new Date();
-    switch ((status || "").toLowerCase()) {
-      case "active":
-        query.isDeleted = 0;
-        break;
-      case "deleted":
-        query.isDeleted = 1;
-        break;
-      case "today":
-        const startToday = new Date().setHours(0, 0, 0, 0);
-        const endToday = new Date().setHours(23, 59, 59, 999);
-        query.listedDate = {
-          $gte: new Date(startToday),
-          $lte: new Date(endToday),
-        };
-        break;
-      case "yesterday":
-        const yesterday = new Date(Date.now() - 86400000);
-        const startYest = new Date(yesterday.setHours(0, 0, 0, 0));
-        const endYest = new Date(yesterday.setHours(23, 59, 59, 999));
-        query.listedDate = {
-          $gte: new Date(startYest),
-          $lte: new Date(endYest),
-        };
-        break;
-    }
+      // 6. Add lookup stages for user-specific data if userId is provided
+      if (userId) {
+        pipeline.push(
+          {
+            $lookup: {
+              from: 'userpropertystatuses',
+              let: { propId: { $toString: '$_id' } },
+              pipeline: [
+                {
+                  $match: {
+                    $expr: {
+                      $and: [
+                        { $eq: ['$propId', '$$propId'] },
+                        { $eq: ['$userId', userId] }
+                      ]
+                    }
+                  }
+                }
+              ],
+              as: 'status'
+            }
+          }
+        );
 
-    // 4. listedOn filter
-    if (listedOn) {
-      const [day, month, year] = listedOn.split("/");
-      const start = new Date(`${year}-${month}-${day}T00:00:00`);
-      const end = new Date(`${year}-${month}-${day}T23:59:59`);
-      query.listedDate = { $gte: start, $lte: end };
-    }
+        // Add match stage to filter out excluded statuses
+        pipeline.push({
+          $match: {
+            $or: [
+              // Include properties with no status
+              { 'status': { $size: 0 } },
+              // Include properties with allowed statuses
+              {
+                $and: [
+                  { 'status': { $size: 1 } },
+                  { 'status.0.status': { $nin: ["Sell out", "Rent out", "Broker", "Duplicate", "Data Mismatch"] } }
+                ]
+              }
+            ]
+          }
+        });
+      }
 
-    // 1. Find all matching property IDs (no pagination yet)
-    const allProperties = await PropertyDetails.find(query).sort({ createdOn: -1 }).lean();
-    const allIds = allProperties.map(p => p._id.toString());
+      // 7. Add pagination
+      pipeline.push(
+        { $skip: page * size },
+        { $limit: size }
+      );
 
-    // 2. Get status for these properties for this user
-    const statuses = await UserPropertyStatus.find({ userId, propId: { $in: allIds } }).lean();
-    const statusMap = Object.fromEntries(statuses.map(s => [s.propId, s.status]));
-
-    // 3. Filter out excluded statuses
-    const excludedStatuses = ["Sell out", "Rent out", "Broker", "Duplicate"];
-    const visibleProperties = allProperties.filter(p => !excludedStatuses.includes(statusMap[p._id.toString()] || "Active"));
-
-    // 4. Paginate the filtered list
-    let paginatedProperties = visibleProperties.slice(page * size, (page + 1) * size);
-
-    // 5. Add extra metadata
-    if (userId && paginatedProperties.length) {
-      const user = await User.findById(userId).lean();
-      const savedSet = new Set(user.savedPropertyIds || []);
-      const contactedSet = new Set(user.contactedPropertyIds || []);
-      const ids = paginatedProperties.map((p) => p._id.toString());
-
-      const [statuses, remarks] = await Promise.all([
-        UserPropertyStatus.find({ userId, propId: { $in: ids } }).lean(),
-        UserPropertyRemark.find({ userId, propId: { $in: ids } }).lean(),
+      // 8. Execute aggregation with parallel count
+      const [properties, totalCount] = await Promise.all([
+        PropertyDetails.aggregate(pipeline),
+        PropertyDetails.countDocuments(query)
       ]);
 
-      const statusMap = Object.fromEntries(
-        statuses.map((s) => [s.propId, s.status])
-      );
-      const remarkMap = Object.fromEntries(
-        remarks.map((r) => [r.propId, r.remark])
-      );
+      // 9. Process results efficiently
+      const processedProperties = properties.map(property => {
+        const status = property.status?.[0]?.status || "Active";
+        const remark = property.remark?.[0]?.remark || null;
+        const user = property.user?.[0];
+        const isSpecificUser = userId === "67128ea2d6da233a1af20f30";
+        
+        return {
+          ...property,
+          status,
+          remark,
+          isSaved: user?.savedPropertyIds?.includes(property._id.toString()) ? 1 : 0,
+          number: user?.contactedPropertyIds?.includes(property._id.toString())
+            ? isSpecificUser
+              ? "9" + Math.floor(100000000 + Math.random() * 900000000).toString()
+              : String(property.number || "0")
+            : "0",
+          name: user?.contactedPropertyIds?.includes(property._id.toString()) ? property.name : "0"
+        };
+      });
 
-      paginatedProperties = paginatedProperties
-        .map((p) => {
-          const id = p._id.toString();
-          const isSpecificUser = userId === "67128ea2d6da233a1af20f30";
-          return {
-            ...p,
-            isSaved: savedSet.has(id) ? 1 : 0,
-            status: statusMap[id] || "Active",
-            remark: remarkMap[id] || null,
-            number: contactedSet.has(id)
-              ? isSpecificUser
-                ? "9" +
-                  Math.floor(100000000 + Math.random() * 900000000).toString()
-                : String(p.number || "0")
-              : "0",
-            name: contactedSet.has(id) ? p.name : "0",
-          };
-        });
+      return {
+        properties: processedProperties,
+        currentPage: page,
+        totalItems: totalCount,
+        totalPages: Math.ceil(totalCount / size)
+      };
+    } catch (error) {
+      console.error('Error in filterPropertiesSharingFlatV2:', error);
+      throw new Error('Failed to fetch properties');
     }
-
-    // Corrected totalPages calculation and moved try-catch
-    const totalItems = visibleProperties.length;
-    const totalPages = Math.ceil(totalItems / size); // Correct calculation
-
-    return {
-      properties: paginatedProperties,
-      currentPage: page,
-      totalItems: totalItems,
-      totalPages: totalPages,
-    };
   }
 
   /**
@@ -415,6 +368,36 @@ class PropertyService {
 
     return property;
   }
+  
+  async searchpremiseandaddress(query) {
+    try {
+      if (!query) {
+        throw new Error("Search query is required");
+      }
+
+      // Create case-insensitive regex pattern for the search query
+      const searchPattern = new RegExp(query, 'i');
+
+      // Search in title field and only return title
+      const properties = await PropertyDetails.find(
+        {
+          title: searchPattern,
+          isDeleted: { $ne: 1 }
+        },
+        { title: 1, _id: 0 }  // Only return title field, exclude _id
+      ).sort({ createdOn: -1 });
+
+      console.log(`Found ${properties.length} properties matching query: ${query}`);
+
+      return {
+        success: true,
+        data: properties.map(p => p.title)  // Return array of titles only
+      };
+    } catch (error) {
+      console.error('Error searching properties:', error);
+      throw new Error(error.message || "Failed to search properties");
+    }
+  }
 
   /**
    * Update property status
@@ -428,26 +411,53 @@ class PropertyService {
       throw new Error("Property ID, new status, and user ID are required");
     }
 
-    // Find existing status record
-    let statusRecord = await UserPropertyStatus.findOne({ propId, userId });
+    // Validate status
+    const validStatuses = ['Active', 'Sell out', 'Rent out', 'Broker', 'Duplicate', 'Data Mismatch'];
+    if (!validStatuses.includes(newStatus)) {
+      throw new Error(`Invalid status. Must be one of: ${validStatuses.join(', ')}`);
+    }
 
-    if (statusRecord) {
-      // Update existing record
-      statusRecord.status = newStatus;
-      statusRecord.updatedAt = new Date();
-      await statusRecord.save();
-      return statusRecord;
-    } else {
-      // Create new record
-      statusRecord = new UserPropertyStatus({
-        propId,
-        userId,
-        status: newStatus,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      });
-      await statusRecord.save();
-      return statusRecord;
+    try {
+      // Find existing status record
+      let statusRecord = await UserPropertyStatus.findOne({ propId, userId });
+
+      if (statusRecord) {
+        // Update existing record
+        statusRecord.status = newStatus;
+        statusRecord.updatedAt = new Date();
+        await statusRecord.save();
+      } else {
+        // Create new record
+        statusRecord = new UserPropertyStatus({
+          propId,
+          userId,
+          status: newStatus,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        });
+        await statusRecord.save();
+      }
+
+      // If status is one of the excluded ones, remove from saved properties
+      const excludedStatuses = ["Sell out", "Rent out", "Broker", "Duplicate", "Data Mismatch"];
+      if (excludedStatuses.includes(newStatus)) {
+        await User.findByIdAndUpdate(
+          userId,
+          { $pull: { savedPropertyIds: propId } },
+          { new: true }
+        );
+      }
+
+      return { 
+        success: true, 
+        message: "Status updated successfully", 
+        status: statusRecord,
+        propertyId: propId,
+        newStatus: newStatus
+      };
+    } catch (error) {
+      console.error("Error updating property status:", error);
+      throw new Error(error.message || "Failed to update property status");
     }
   }
 

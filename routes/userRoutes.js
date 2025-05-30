@@ -18,7 +18,9 @@ router.get('/', UserController.healthCheck);
 router.post('/v2/signin/vkjdbfuhe/nkdkjbed', UserController.register);
 router.post('/v2/login/dljcnji/cekbjid', UserController.login);
 
-// Property routes
+
+router.get('/properties/searchPremiuse', UserController.searchquery);// Property routes
+
 router.post('/properties/filter/jkdbxcb/wdjkwbshuvcw/fhwjvshudcknsb', UserController.filterProperties);
 router.post('/v2/properties/filter/jkdbxcb/wdjkwbshuvcw/fhwjvshudcknsb', UserController.filterPropertiesv2);
 router.get('/counts/fjkbfhwb/fkjbwdiwhbdjwkfjwbj', UserController.getPropertyCountsByStatusAndType);
