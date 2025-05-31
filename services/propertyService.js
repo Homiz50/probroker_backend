@@ -131,6 +131,7 @@ class PropertyService {
       }));
     }
 
+    
     try {
       // 5. Build aggregation pipeline for efficient querying
       const pipeline = [
@@ -140,85 +141,92 @@ class PropertyService {
 
       // 6. Add lookup stages for user-specific data if userId is provided
       if (userId) {
+        // Explicitly fetch the latest user document to get savedPropertyIds
+        const latestUser = await User.findById(userId).lean();
+        const userSavedPropertyIds = new Set(latestUser?.savedPropertyIds?.map(id => id.toString()) || []);
+
         pipeline.push(
-          {
-            $lookup: {
-              from: 'userpropertystatuses',
-              let: { propId: { $toString: '$_id' } },
-              pipeline: [
-                {
-                  $match: {
-                    $expr: {
-                      $and: [
-                        { $eq: ['$propId', '$$propId'] },
-                        { $eq: ['$userId', userId] }
-                      ]
-                    }
-                  }
-                }
-              ],
-              as: 'status'
-            }
-          }
+          { $skip: page * size },
+          { $limit: size }
         );
 
-        // Add match stage to filter out excluded statuses
-        pipeline.push({
-          $match: {
-            $or: [
-              // Include properties with no status
-              { 'status': { $size: 0 } },
-              // Include properties with allowed statuses
-              {
-                $and: [
-                  { 'status': { $size: 1 } },
-                  { 'status.0.status': { $nin: ["Sell out", "Rent out", "Broker", "Duplicate", "Data Mismatch"] } }
-                ]
-              }
-            ]
-          }
-        });
+        // 8. Execute aggregation with parallel count
+        const [properties, totalCount] = await Promise.all([
+          PropertyDetails.aggregate(pipeline),
+          PropertyDetails.countDocuments(query)
+        ]);
+
+        // Fetch statuses and remarks separately for properties retrieved in this page
+        const propertyIdsOnPage = properties.map(p => p._id.toString());
+        const [statuses, remarks] = await Promise.all([
+          UserPropertyStatus.find({ userId, propId: { $in: propertyIdsOnPage } }).lean(),
+          UserPropertyRemark.find({ userId, propId: { $in: propertyIdsOnPage } }).lean(),
+        ]);
+
+        const statusMap = Object.fromEntries(statuses.map(s => [s.propId, s.status]));
+        const remarkMap = Object.fromEntries(remarks.map(r => [r.propId, r.remark]));
+        const excludedStatuses = ["Sell out", "Rent out", "Broker", "Duplicate", "Data Mismatch"];
+        const isSpecificUser = userId === "67128ea2d6da233a1af20f30";
+
+        // 9. Process results efficiently
+        const processedProperties = properties
+          .map(property => {
+            const propId = property._id.toString();
+            const status = statusMap[propId] || "Active";
+            const remark = remarkMap[propId] || null;
+            // Check if the property ID is in the fetched savedPropertyIds set
+            const isSaved = userSavedPropertyIds.has(propId) ? 1 : 0;
+
+            return {
+              ...property,
+              status,
+              remark,
+              isSaved: isSaved,
+              number: latestUser?.contactedPropertyIds?.includes(propId) 
+                ? isSpecificUser
+                  ? "9" + Math.floor(100000000 + Math.random() * 900000000).toString()
+                  : String(property.number || "0")
+                : "0",
+              name: latestUser?.contactedPropertyIds?.includes(propId) ? property.name : "0"
+            };
+          })
+          .filter(p => !excludedStatuses.includes(p.status));
+
+        return {
+          properties: processedProperties,
+          currentPage: page,
+          totalItems: totalCount,
+          totalPages: Math.ceil(totalCount / size)
+        };
+
+      } else { // Handle case where userId is not provided
+         pipeline.push(
+          { $skip: page * size },
+          { $limit: size }
+        );
+
+        const [properties, totalCount] = await Promise.all([
+          PropertyDetails.aggregate(pipeline),
+          PropertyDetails.countDocuments(query)
+        ]);
+
+        const processedProperties = properties.map(property => ({
+          ...property,
+          isSaved: 0, // Not saved if no user ID
+          status: "Active",
+          remark: null,
+          number: "0",
+          name: "0"
+        }));
+
+        return {
+          properties: processedProperties,
+          currentPage: page,
+          totalItems: totalCount,
+          totalPages: Math.ceil(totalCount / size)
+        };
       }
 
-      // 7. Add pagination
-      pipeline.push(
-        { $skip: page * size },
-        { $limit: size }
-      );
-
-      // 8. Execute aggregation with parallel count
-      const [properties, totalCount] = await Promise.all([
-        PropertyDetails.aggregate(pipeline),
-        PropertyDetails.countDocuments(query)
-      ]);
-
-      // 9. Process results efficiently
-      const processedProperties = properties.map(property => {
-        const status = property.status?.[0]?.status || "Active";
-        const remark = property.remark?.[0]?.remark || null;
-        const user = property.user?.[0];
-        const isSpecificUser = userId === "67128ea2d6da233a1af20f30";
-        
-        return {
-          ...property,
-          status,
-          remark,
-          isSaved: user?.savedPropertyIds?.includes(property._id.toString()) ? 1 : 0,
-          number: user?.contactedPropertyIds?.includes(property._id.toString())
-            ? isSpecificUser
-              ? "9" + Math.floor(100000000 + Math.random() * 900000000).toString()
-              : String(property.number || "0")
-            : "0",
-          name: user?.contactedPropertyIds?.includes(property._id.toString()) ? property.name : "0"
-        };
-      });
-
-      return {
-        properties: processedProperties,
-        currentPage: page,
-        totalItems: totalCount,
-        totalPages: Math.ceil(totalCount / size)
-      };
     } catch (error) {
       console.error('Error in filterPropertiesSharingFlatV2:', error);
       throw new Error('Failed to fetch properties');
@@ -544,8 +552,7 @@ class PropertyService {
             remark: remarkMap[id] || null,
             number: contactedSet.has(id)
               ? isSpecificUser
-                ? "9" +
-                  Math.floor(100000000 + Math.random() * 900000000).toString()
+                ? "9" + Math.floor(100000000 + Math.random() * 900000000).toString()
                 : String(p.number || "0")
               : "0",
             name: contactedSet.has(id) ? p.name : "0",
