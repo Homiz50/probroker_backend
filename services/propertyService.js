@@ -420,7 +420,7 @@ class PropertyService {
     }
 
     // Validate status
-    const validStatuses = ['Active', 'Sell out', 'Rent out', 'Broker', 'Duplicate', 'Data Mismatch'];
+    const validStatuses = ['Active', 'Sell out', 'Rent out', 'Broker', 'Duplicate', 'Data Mismatch' ,'Not Answer'];
     if (!validStatuses.includes(newStatus)) {
       throw new Error(`Invalid status. Must be one of: ${validStatuses.join(', ')}`);
     }
