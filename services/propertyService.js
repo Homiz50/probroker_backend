@@ -386,20 +386,23 @@ class PropertyService {
       // Create case-insensitive regex pattern for the search query
       const searchPattern = new RegExp(query, 'i');
 
-      // Search in title field and only return title
+      // Search in title field and return both title and address
       const properties = await PropertyDetails.find(
         {
           title: searchPattern,
           isDeleted: { $ne: 1 }
         },
-        { title: 1, _id: 0 }  // Only return title field, exclude _id
+        { title: 1, address: 1, _id: 0 }  // Return both title and address fields
       ).sort({ createdOn: -1 });
 
       console.log(`Found ${properties.length} properties matching query: ${query}`);
 
       return {
         success: true,
-        data: properties.map(p => p.title)  // Return array of titles only
+        data: properties.map(p => ({
+          title: p.title,
+          address: p.address
+        }))  // Return array of objects with title and address
       };
     } catch (error) {
       console.error('Error searching properties:', error);
